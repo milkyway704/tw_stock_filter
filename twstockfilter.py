@@ -90,40 +90,27 @@ if btn:
                 
                 tv_format_list.append(f"{mkt}:{c}")
                 display_data.append({"代號": c, "名稱": name, "市場": mkt})
-                    final_codes = codes[:max_count]
-                    tv_format_list = []
-                    display_data = []
-                    
-                    for c in final_codes:
-                        info = mapping.get(str(c))
-                        # --- 核心保底：如果 mapping 失敗，預設顯示代號 ---
-                        mkt = info['prefix'] if info else "TWSE"
-                        name = info['name'] if info else "名稱待查"
-                        
-                        prefix_code = f"{mkt}:{c}"
-                        tv_format_list.append(prefix_code)
-                        display_data.append({"代號": c, "名稱": name, "市場": mkt})
-                    
-                    st.success(f"找到共 {len(codes)} 檔股票")
+            
+            st.success(f"找到共 {len(codes)} 檔股票")
 
-                    # 檔名日期
-                    current_date = datetime.now().strftime("%Y_%m_%d")
-                    dynamic_filename = f"TW_{current_date}.txt"
-                    
-                    # TradingView 區塊
-                    csv_string = ",".join(tv_format_list)
-                    st.subheader("🔥 TradingView 匯入字串")
-                    st.code(csv_string, language="text") 
-                    
-                    st.download_button(
-                        label=f"📥 下載 {dynamic_filename}",
-                        data=csv_string,
-                        file_name=dynamic_filename,
-                        mime="text/plain",
-                        use_container_width=True
-                    )
-                    
-                    st.subheader("📋 詳細清單")
-                    st.dataframe(display_data, use_container_width=True)
+            # 檔名日期
+            current_date = datetime.now().strftime("%Y_%m_%d")
+            dynamic_filename = f"TW_{current_date}.txt"
+            
+            # TradingView 區塊
+            csv_string = ",".join(tv_format_list)
+            st.subheader("🔥 TradingView 匯入字串")
+            st.code(csv_string, language="text") 
+            
+            st.download_button(
+                label=f"📥 下載 {dynamic_filename}",
+                data=csv_string,
+                file_name=dynamic_filename,
+                mime="text/plain",
+                use_container_width=True
+            )
+            
+            st.subheader("📋 詳細清單")
+            st.dataframe(display_data, use_container_width=True)
         else:
             st.warning("查無符合條件之股票。")
