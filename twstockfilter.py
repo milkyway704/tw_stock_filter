@@ -5,12 +5,12 @@ import re
 from datetime import datetime
 import urllib3
 
-# 1. 強制禁用 SSL 警告訊息，確保網頁介面乾淨 
+# [cite_start]禁用 SSL 安全警告 [cite: 1]
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="台股 RS 篩選器", page_icon="📈")
 
-# 2. 加入 verify=False 解決雲端 SSL 報錯問題 
+# --- 1. 股票地圖 (SSL 忽略版) ---
 @st.cache_data(ttl=604800)
 def get_stock_mapping():
     urls = {
@@ -21,7 +21,7 @@ def get_stock_mapping():
     headers = {'User-Agent': 'Mozilla/5.0'}
     for market, url in urls.items():
         try:
-            # 關鍵修改：verify=False 
+            # [cite_start]關鍵：verify=False 解決雲端 SSL 報錯 [cite: 1]
             resp = requests.get(url, headers=headers, timeout=10, verify=False)
             resp.encoding = 'ms950'
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -38,10 +38,10 @@ def get_stock_mapping():
             continue
     return mapping
 
+# --- 2. MoneyDJ 抓取 ---
 def fetch_moneydj_rs(weeks, min_rank):
     url = f"https://moneydj.emega.com.tw/z/zk/zkf/zkResult.asp?D=1&A=x@250,a@{weeks},b@{min_rank}&site="
     try:
-        # 同樣加入 verify=False 以策安全 
         resp = requests.get(url, timeout=15, verify=False)
         resp.encoding = 'big5'
         match = re.search(r"parent\.sStklistAll\s*=\s*'([^']+)'", resp.text)
@@ -52,13 +52,21 @@ def fetch_moneydj_rs(weeks, min_rank):
         pass
     return []
 
-# --- 介面佈局 ---
+# --- 3. 介面佈局 ---
 st.title("🇹🇼 台股 RS Rank 篩選器")
+
+# 設定區
 weeks = st.slider("選擇週數", 1, 52, 1)
 min_rank = st.number_input("RS Rank 大於等於", 1, 99, 80)
 max_count = st.number_input("至多顯示幾筆", 1, 500, 200)
 
+# 重新放回 MoneyDJ 連結 (會隨參數變動)
+mdj_url = f"https://moneydj.emega.com.tw/z/zk/zkf/zkResult.asp?D=1&A=x@250,a@{weeks},b@{min_rank}&site="
+st.markdown(f"🔍 [🔗 開啟 MoneyDJ 原始網頁確認]({mdj_url})")
+
 btn = st.button("🚀 執行篩選", type="primary", use_container_width=True)
+
+st.divider()
 
 if btn:
     with st.spinner('正在同步數據...'):
@@ -72,7 +80,6 @@ if btn:
             
             for c in final_codes:
                 info = mapping.get(str(c))
-                # 3. 核心保底：即使 mapping 失敗，也預設顯示代號，保證 TradingView 字串產出 
                 mkt = info['prefix'] if info else "TWSE"
                 name = info['name'] if info else "名稱待查"
                 tv_list.append(f"{mkt}:{c}")
@@ -93,6 +100,9 @@ if btn:
                 mime="text/plain",
                 use_container_width=True
             )
+            
+            st.subheader("📋 詳細清單")
             st.dataframe(display_data, use_container_width=True)
         else:
             st.warning("查無符合條件之股票。")
+            st.info(f"建議點擊上方連結至 MoneyDJ 網頁確認是否有資料。")
