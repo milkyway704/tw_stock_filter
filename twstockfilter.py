@@ -9,12 +9,11 @@ import urllib3
 # 禁用 SSL 安全警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 設定頁面，針對手機版建議使用寬度自動調整
+# 設定頁面
 st.set_page_config(page_title="RS Rank Filter", page_icon="📈", layout="centered")
 
 # --- 通用工具 ---
 def get_tw_time():
-    # 伺服器通常為 UTC，台灣為 UTC+8
     return datetime.utcnow() + timedelta(hours=8)
 
 # --- 1. 台股專用：股票地圖 ---
@@ -59,7 +58,6 @@ def fetch_moneydj_rs(weeks, min_rank):
 # --- 3. 美股專用：Google Sheet 抓取 ---
 @st.cache_data(ttl=3600)
 def fetch_us_rs_from_gsheet():
-    # 您的 Google Sheet 連結
     gsheet_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E/edit?usp=sharing"
     csv_url = gsheet_url.replace('/edit?usp=sharing', '/export?format=csv')
     try:
@@ -70,22 +68,21 @@ def fetch_us_rs_from_gsheet():
         return None
 
 # --- UI 介面開始 ---
-# 標題居中 (符合草圖)
+# 1. 標題居中
 st.markdown("<h1 style='text-align: center;'>RS Rank Filter</h1>", unsafe_allow_html=True)
 
-# 使用 Tabs 實作 US / TW 切換 (手機版最直覺的操作)
+# 2. Tabs 切換 (US / TW)
 tab_us, tab_tw = st.tabs(["🇺🇸 US (美股)", "🇹🇼 TW (台股)"])
 
 # --- 美股分頁 ---
 with tab_us:
-    st.subheader("美股 RS 篩選 (Google Sheet)")
+    st.subheader("美股 RS 篩選")
     min_rs_us = st.number_input("RS Rank 最低標", 1, 99, 90, key="us_input")
     
     if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
         with st.spinner('讀取數據中...'):
             df_us = fetch_us_rs_from_gsheet()
             if df_us is not None:
-                # 欄位偵測邏輯
                 rs_col = next((c for c in df_us.columns if 'RS' in c.upper()), None)
                 sym_col = next((c for c in df_us.columns if 'SYMBOL' in c.upper() or 'TICKER' in c.upper()), None)
                 
@@ -103,15 +100,20 @@ with tab_us:
 
 # --- 台股分頁 ---
 with tab_tw:
-    st.subheader("台股 RS 篩選 (MoneyDJ)")
-    # 使用 columns 讓手機版併排，減少滾動
+    st.subheader("台股 RS 篩選")
+    
+    # 修改處：週數改為 number_input (預設 2)，並與排名下限併排
     col1, col2 = st.columns(2)
     with col1:
-        weeks = st.selectbox("週數", options=[1, 2, 4, 8, 12, 24, 52], index=0)
+        weeks = st.number_input("週數", 1, 52, 2) 
     with col2:
         min_rank = st.number_input("RS Rank 下限", 1, 99, 80)
     
     max_count = st.slider("顯示上限", 50, 500, 200)
+
+    # 保留 MoneyDJ 原始網頁連結
+    mdj_url = f"https://moneydj.emega.com.tw/z/zk/zkf/zkResult.asp?D=1&A=x@250,a@{weeks},b@{min_rank}&site="
+    st.markdown(f"🔍 [🔗 開啟 MoneyDJ 原始網頁確認]({mdj_url})")
 
     if st.button("🚀 執行台股篩選", type="primary", use_container_width=True):
         with st.spinner('同步數據中...'):
