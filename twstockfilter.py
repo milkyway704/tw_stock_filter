@@ -72,12 +72,12 @@ def fetch_us_rs_from_gsheet():
 st.markdown("<h1 style='text-align: center;'>RS Rank Filter</h1>", unsafe_allow_html=True)
 
 # 2. Tabs 切換 (US / TW)
-tab_us, tab_tw = st.tabs(["🇺🇸 US (美股)", "🇹🇼 TW (台股)"])
+tab_us, tab_tw = st.tabs(["US (美股)", "TW (台股)"])
 
 # --- 美股分頁 ---
 with tab_us:
     st.subheader("美股 RS 篩選 (分頁：FinTasticRS)")
-    min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 90, key="us_input")
+    min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 70, key="us_input")
     
     if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
         with st.spinner('正在分析數據並清理代號...'):
@@ -141,7 +141,7 @@ with tab_us:
                     
             except Exception as e:
                 st.error(f"連線失敗: {e}")
-                              
+
 # --- 台股分頁 ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
