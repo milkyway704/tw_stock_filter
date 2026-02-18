@@ -80,53 +80,50 @@ with tab_us:
     min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 90, key="us_input")
     
     if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
-        with st.spinner('正在讀取數據並修正格式...'):
+        with st.spinner('正在分析數據並清理代號...'):
             base_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E"
+            # 使用 Gviz API 指定分頁，避免抓錯工作表
             csv_url = f"{base_url}/gviz/tq?tqx=out:csv&sheet=FinTasticRS"
             
             try:
+                # 1. 讀取數據
                 df_raw = pd.read_csv(csv_url)
                 
-                # 1. 識別 Symbol 與 RS Rnk 欄位
+                # 2. 識別關鍵欄位
                 symbol_col = next((col for col in df_raw.columns if 'Symbol' in str(col)), None)
                 rs_col = next((col for col in df_raw.columns if 'RS Rnk' in str(col)), None)
                 
                 if symbol_col and rs_col:
+                    # 3. 數據提取與清理
                     df_final = df_raw[[symbol_col, rs_col]].copy()
                     df_final.columns = ['Symbol', 'RS_Rank']
                     
-                    # 2. 數據清洗
                     df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
                     df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
                     
-                    # 嚴格過濾：只保留 1-5 碼純大寫字母（避開標題或雜質）
-                    def is_clean_symbol(s):
-                        return bool(re.match(r'^[A-Z]{1,5}$', s))
+                    # 嚴格過濾邏輯：
+                    # 只保留 1-5 碼純大寫字母，排除標題列與含有數字/符號的雜訊
+                    df_final = df_final[
+                        df_final['RS_Rank'].notna() & 
+                        df_final['Symbol'].str.match(r'^[A-Z]{1,5}$')
+                    ]
                     
-                    df_final = df_final[df_final['Symbol'].apply(is_clean_symbol)]
-                    
-                    # 3. 執行篩選
-                    filtered_us = df_final.dropna(subset=['RS_Rank'])
-                    filtered_us = filtered_us[filtered_us['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
+                    # 執行篩選
+                    filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
                     
                     if not filtered_us.empty:
-                        # 4. TradingView 交易所判斷
-                        # 美股常見邏輯：4碼以上 NASDAQ，3碼以下 NYSE
-                        # 這是目前手動分類中最通用的方式
-                        def get_tv_format(s):
-                            if len(s) >= 4:
-                                return f"NASDAQ:{s}"
-                            else:
-                                return f"NYSE:{s}"
-                        
-                        tv_symbols = [get_tv_format(s) for s in filtered_us['Symbol']]
+                        # --- 方案 A：輸出純代號格式 ---
+                        # 直接輸出如 AAPL,TSLA,MU，讓 TradingView 自行匹配交易所
+                        tv_symbols = filtered_us['Symbol'].tolist()
                         csv_string_us = ",".join(tv_symbols)
                         
-                        # 5. 格式化檔名 (比照台股 US_YYYY_MM_DD.txt)
-                        tw_time = get_tw_time()
-                        dynamic_filename = f"US_{tw_time.strftime('%Y_%m_%d')}.txt"
+                        # 4. 格式化檔名 (比照台股)
+                        tw_now = get_tw_time()
+                        dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
                         
                         st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
+                        
+                        st.subheader("🔥 TradingView 匯入字串 (純代號)")
                         st.code(csv_string_us)
                         
                         st.download_button(
@@ -138,13 +135,13 @@ with tab_us:
                         )
                         st.dataframe(filtered_us, use_container_width=True)
                     else:
-                        st.warning(f"查無 RS Rank >= {min_rs_us} 的數據。")
+                        st.warning(f"目前清單中沒有 RS >= {min_rs_us} 的股票。")
                 else:
-                    st.error("欄位定位失敗，請確認表格包含 Symbol 與 RS Rnk。")
+                    st.error("定位失敗，找不到 Symbol 或 RS Rnk 欄位。")
                     
             except Exception as e:
-                st.error(f"執行出錯: {e}")
-                
+                st.error(f"連線失敗: {e}")
+                              
 # --- 台股分頁 ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
