@@ -80,73 +80,66 @@ with tab_us:
     min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 90, key="us_input")
     
     if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
-        with st.spinner('正在讀取數據...'):
-            # 使用更穩定的導出方式：指定分頁名稱 sheet=FinTasticRS
-            # 同時移除 usp=sharing 避免參數衝突導致 400 Error
+        with st.spinner('正在讀取數據並優化 TradingView 格式...'):
             base_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E"
             csv_url = f"{base_url}/gviz/tq?tqx=out:csv&sheet=FinTasticRS"
             
             try:
-                # 1. 讀取數據 (使用 tq 介面通常更穩定)
                 df_raw = pd.read_csv(csv_url)
                 
-                # 2. 自動識別欄位 (不管他在第幾列或第幾欄)
-                # 從您的 CSV 看到，代號欄位叫 'Symbol'，RS 排名欄位叫 'RS Rnk'
-                symbol_col = None
-                rs_col = None
-                
-                # 遍歷所有欄位名稱進行模糊比對
-                for col in df_raw.columns:
-                    if 'Symbol' in str(col):
-                        symbol_col = col
-                    if 'RS Rnk' in str(col):
-                        rs_col = col
+                # 1. 自動識別欄位
+                symbol_col = next((col for col in df_raw.columns if 'Symbol' in str(col)), None)
+                rs_col = next((col for col in df_raw.columns if 'RS Rnk' in str(col)), None)
                 
                 if symbol_col and rs_col:
-                    # 3. 提取數據並轉為數字
                     df_final = df_raw[[symbol_col, rs_col]].copy()
                     df_final.columns = ['Symbol', 'RS_Rank']
                     
+                    # 2. 數據清理
                     df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
                     df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
                     
-                    # 4. 執行篩選
-                    filtered_us = df_final.dropna(subset=['Symbol', 'RS_Rank'])
+                    # 移除無效代號：確保代號只包含英文字母與點（如 BRK.B）
+                    def is_valid_symbol(s):
+                        return bool(re.match(r'^[A-Z.]+$', s))
+                    
+                    df_final = df_final[df_final['Symbol'].apply(is_valid_symbol)]
+                    
+                    # 3. 篩選與排序
+                    filtered_us = df_final.dropna(subset=['RS_Rank'])
                     filtered_us = filtered_us[filtered_us['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
                     
                     if not filtered_us.empty:
-                        # 5. 加上交易所前綴 (符合 TradingView 格式)
-                        def add_tv_prefix(s):
-                            # 3碼以下 NYSE, 4碼以上 NASDAQ
-                            return f"NASDAQ:{s}" if len(s) >= 4 else f"NYSE:{s}"
-                        
-                        tv_symbols = [add_tv_prefix(s) for s in filtered_us['Symbol']]
+                        # 4. TradingView 前綴優化
+                        # 使用 "US:" 萬用前綴可解決 99% 的美股匯入問題
+                        tv_symbols = [f"US:{s}" for s in filtered_us['Symbol']]
                         csv_string_us = ",".join(tv_symbols)
                         
-                        st.success(f"成功連線並取得 FinTasticRS 分頁數據！")
+                        # 5. 格式化檔名 (比照台股)
+                        tw_time = get_tw_time()
+                        dynamic_filename = f"US_{tw_time.strftime('%Y_%m_%d')}.txt"
+                        
+                        st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
+                        
                         st.subheader("🔥 TradingView 匯入字串")
                         st.code(csv_string_us)
                         
                         st.download_button(
-                            label="📥 下載匯入檔 (.txt)",
+                            label=f"📥 下載 {dynamic_filename}",
                             data=csv_string_us,
-                            file_name=f"US_RS{min_rs_us}_{get_tw_time().strftime('%Y%m%d')}.txt",
+                            file_name=dynamic_filename,
+                            mime="text/plain",
                             use_container_width=True
                         )
                         st.dataframe(filtered_us, use_container_width=True)
                     else:
-                        st.warning(f"在分頁中找不到 RS Rank >= {min_rs_us} 的數據。")
+                        st.warning(f"查無 RS Rank >= {min_rs_us} 的標的。")
                 else:
-                    st.error("❌ 無法在分頁中找到 'Symbol' 或 'RS Rnk' 欄位。")
-                    st.write("目前抓取到的欄位名稱有：", list(df_raw.columns))
-                    # 顯示前幾行供 Debug
-                    st.write("前三列預覽：")
-                    st.dataframe(df_raw.head(3))
+                    st.error("無法定位 Symbol 或 RS Rnk 欄位，請檢查分頁內容。")
                     
             except Exception as e:
-                st.error(f"連線或解析失敗: {e}")
-                st.info("請檢查該 Google Sheet 是否已開啟「知道連結的人均可檢視」權限。")
-                
+                st.error(f"連線失敗: {e}")                
+
 # --- 台股分頁 ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
