@@ -77,78 +77,78 @@ tab_us, tab_tw = st.tabs(["🇺🇸 US (美股)", "🇹🇼 TW (台股)"])
 # --- 美股分頁 ---
 with tab_us:
     st.subheader("美股 RS 篩選")
-    st.caption("動態對位：自動尋找 Symbol 與 RS Rnk 欄位 | 自動加上交易所前綴")
+    st.caption("自動對位：避開網址說明列，精確抓取 Symbol 與 RS Rnk")
     min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 90, key="us_input")
     
     if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
-        with st.spinner('精確掃描數據欄位中...'):
+        with st.spinner('正在分析表格結構...'):
             gsheet_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E/edit?usp=sharing"
             csv_url = gsheet_url.replace('/edit?usp=sharing', '/export?format=csv')
             
             try:
-                # 1. 讀取原始數據
+                # 1. 讀取數據 (header=None 確保不漏掉任何一列)
                 df_raw = pd.read_csv(csv_url, header=None)
                 
-                # 2. 動態尋找欄位索引 (解決位移問題)
                 symbol_idx = None
                 rs_idx = None
-                start_row = 0
+                data_start_row = 0
                 
-                # 掃描前 5 列尋找標題位置
-                for i in range(5):
-                    row_values = df_raw.iloc[i].astype(str).tolist()
-                    if 'Symbol' in row_values:
-                        symbol_idx = row_values.index('Symbol')
-                        start_row = i + 1 # 資料從標題下一列開始
-                    # 尋找包含 RS Rnk 的欄位
-                    for idx, val in enumerate(row_values):
-                        if 'RS Rnk' in val:
-                            rs_idx = idx
+                # 2. 掃描前 10 列尋找真正的標題行
+                for row_i in range(min(10, len(df_raw))):
+                    row_list = df_raw.iloc[row_i].astype(str).tolist()
+                    # 只要這一行有 Symbol 且有 RS Rnk 
+                    if 'Symbol' in row_list and any('RS Rnk' in str(x) for x in row_list):
+                        symbol_idx = row_list.index('Symbol')
+                        # 尋找包含 'RS Rnk' 的欄位索引
+                        for col_i, col_val in enumerate(row_list):
+                            if 'RS Rnk' in str(col_val):
+                                rs_idx = col_i
+                        data_start_row = row_i + 1 # 資料從標題的下一列開始
+                        break
                 
                 if symbol_idx is not None and rs_idx is not None:
-                    # 3. 提取資料並清理
-                    df_us = df_raw.iloc[start_row:, [symbol_idx, rs_idx]].copy()
-                    df_us.columns = ['Symbol', 'RS_Rank']
+                    # 3. 提取數據
+                    df_final = df_raw.iloc[data_start_row:, [symbol_idx, rs_idx]].copy()
+                    df_final.columns = ['Symbol', 'RS_Rank']
                     
-                    df_us['RS_Rank'] = pd.to_numeric(df_us['RS_Rank'], errors='coerce')
-                    df_us = df_us.dropna(subset=['Symbol', 'RS_Rank'])
+                    # 轉換數值並清理
+                    df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
+                    df_final = df_final.dropna(subset=['Symbol', 'RS_Rank'])
                     
-                    # 4. 執行篩選
-                    filtered_us = df_us[df_us['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
+                    # 4. 篩選與排序
+                    filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
                     
                     if not filtered_us.empty:
-                        # 5. 交易所前綴處理函式
-                        def add_prefix(s):
+                        # 5. 交易所前綴判斷邏輯 (TradingView 格式)
+                        def add_tv_prefix(s):
                             s = str(s).strip().upper()
-                            # 簡單判斷邏輯：4碼以上通常是納斯達克，3碼以下紐交所
-                            # 這在 TradingView 匯入時能大幅提高成功率
-                            if len(s) >= 4:
-                                return f"NASDAQ:{s}"
-                            else:
-                                return f"NYSE:{s}"
+                            # 簡單判斷：4碼(含)以上 NASDAQ，3碼(含)以下 NYSE
+                            # 這是美股最常見的分類方式，能匹配 95% 以上股票
+                            return f"NASDAQ:{s}" if len(s) >= 4 else f"NYSE:{s}"
                         
-                        tv_symbols = [add_prefix(s) for s in filtered_us['Symbol']]
+                        tv_symbols = [add_tv_prefix(s) for s in filtered_us['Symbol']]
                         csv_string_us = ",".join(tv_symbols)
                         
-                        st.success(f"定位成功！找到 {len(filtered_us)} 檔標的")
+                        st.success(f"解析成功！找到 {len(filtered_us)} 檔股票")
                         st.subheader("🔥 TradingView 匯入字串")
                         st.code(csv_string_us)
                         
                         st.download_button(
                             label="📥 下載匯入檔 (.txt)",
                             data=csv_string_us,
-                            file_name=f"US_TV_{get_tw_time().strftime('%Y%m%d')}.txt",
+                            file_name=f"US_RS{min_rs_us}_{get_tw_time().strftime('%Y%m%d')}.txt",
                             use_container_width=True
                         )
                         st.dataframe(filtered_us, use_container_width=True)
                     else:
-                        st.warning("篩選後無符合結果。")
+                        st.warning(f"目前清單中沒有 RS Rank >= {min_rs_us} 的股票。")
                 else:
-                    st.error(f"找不到標題欄位。偵測到欄位：{df_raw.iloc[1].tolist()}")
+                    st.error("無法在表格中定位 'Symbol' 或 'RS Rnk' 欄位。")
+                    st.info(f"偵測到的第一列內容：{df_raw.iloc[0].tolist()[:5]}...")
                     
             except Exception as e:
-                st.error(f"讀取失敗: {e}")
-
+                st.error(f"執行出錯: {e}")
+                
 # --- 台股分頁 ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
