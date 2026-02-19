@@ -76,31 +76,36 @@ def get_canslim_info(symbol):
         return None
 
 # --- UI 介面開始 ---
-# --- 1. 隱藏標題連結圖示並設定標題為超連結 ---
+# --- 強制標題樣式：永遠白色、無底線 ---
 st.markdown(
     """
     <style>
-    /* 隱藏 Streamlit 自動生成的標題連結圖示 */
-    .stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a {
+    /* 1. 隱藏 Streamlit 預設的標題連結小圖示 */
+    .stApp a.heading-link {
         display: none !important;
     }
     
-    /* 設定大標題樣式，讓它看起來不像傳統連結 */
-    .custom-title {
+    /* 2. 定義標題連結的狀態：初始、已訪問、滑鼠懸停、點擊中 */
+    .custom-title-link, .custom-title-link:link, .custom-title-link:visited, 
+    .custom-title-link:hover, .custom-title-link:active {
+        text-decoration: none !important;  /* 強制無底線 */
+        color: white !important;           /* 強制永遠白色 */
+        cursor: pointer;
         text-align: center;
-        text-decoration: none;
-        color: inherit;
-        font-weight: bold;
         display: block;
         margin: 25px 0px;
+        border: none !important;           /* 避免某些主題出現邊框 */
+        outline: none !important;
     }
-    .custom-title:hover {
-        color: #FF4B4B; /* 滑鼠移上去稍微變色（Streamlit紅），這行可刪除 */
-        text-decoration: none;
+
+    /* 確保裡面的 h1 也不受主題干擾 */
+    .custom-title-link h1 {
+        color: white !important;
+        margin: 0;
     }
     </style>
     
-    <a href="你的網址" target="_blank" class="custom-title">
+    <a href="你的網址" target="_blank" class="custom-title-link">
         <h1>RS Rank Filter</h1>
     </a>
     """, 
