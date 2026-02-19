@@ -211,12 +211,26 @@ with tab_us:
                             st.warning(f"當前：{data['market_trend']}")
 
                         st.divider()
-                        st.progress(min(max(data['inst_pct']/100, 0.0), 1.0), text="法人支持度 (I 指標)")
+                        
+                        # --- 精簡版診斷結論 ---
+                        # 判斷是否符合強勢股門檻
+                        is_strong = data['eps_growth'] > 25 and current_rs >= 80 and dist_from_high < 15
+                        
+                        if is_strong:
+                            st.success(f"🎯 **{selected_stock} 診斷結果：符合強勢股特徵** (C > 25%, L > 80, 接近高點)")
+                        else:
+                            # 找出主要弱項
+                            reasons = []
+                            if data['eps_growth'] <= 25: reasons.append("當季成長(C)未達25%")
+                            if current_rs < 80: reasons.append("相對強度(L)未達80")
+                            if dist_from_high >= 15: reasons.append("股價距高點稍遠")
+                            
+                            st.warning(f"⚠️ **{selected_stock} 診斷提醒：** {'、'.join(reasons)}。建議搭配技術面觀察。")
                     else:
                         st.warning("⚠️ 無法獲取 yfinance 數據。")
         else:
             st.info("💡 請先在「📋 篩選清單」執行篩選。")
-            
+
 # --- 台股分頁 (保持原本 Logic) ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
