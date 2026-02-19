@@ -58,46 +58,56 @@ def get_canslim_info(ticker):
         stock = yf.Ticker(ticker)
         info = stock.info
         
+        # 初始化指標
         eps_growth = 0
         ttm_eps_growth = 0
         
-        # 抓取每季損益表
-        q_financials = stock.quarterly_financials
+        # 獲取季報
+        q_fin = stock.quarterly_financials
         
-        if not q_financials.empty and "Net Income" in q_financials.index:
-            net_income = q_financials.loc["Net Income"]
+        # 確保 Net Income 存在且有數據
+        if not q_fin.empty and "Net Income" in q_fin.index:
+            # 1. 清理數據：去除 NaN 並確保是數字
+            ni = q_fin.loc["Net Income"].dropna()
             
-            # --- C 指標：當季 YoY 成長 ---
-            if len(net_income) >= 5:
-                current_q = net_income.iloc[0]
-                last_year_q = net_income.iloc[4]
-                # 確保數據不是 NaN 且分母不為 0
-                if pd.notna(current_q) and pd.notna(last_year_q) and last_year_q != 0:
-                    eps_growth = ((current_q / last_year_q) - 1) * 100
-            
-            # --- A 指標：近四季 TTM 成長 ---
-            if len(net_income) >= 8:
-                current_4q_sum = net_income.iloc[0:4].sum()
-                last_year_4q_sum = net_income.iloc[4:8].sum()
-                # 確保總和不是 NaN 且分母不為 0
-                if pd.notna(current_4q_sum) and pd.notna(last_year_4q_sum) and last_year_4q_sum != 0:
-                    ttm_eps_growth = ((current_4q_sum / last_year_4q_sum) - 1) * 100
+            # --- C 指標：當季 YoY ---
+            if len(ni) >= 5:
+                # 確保分母不為 0 且數據存在
+                if ni.iloc[4] != 0:
+                    eps_growth = ((ni.iloc[0] / ni.iloc[4]) - 1) * 100
 
-        # 如果透過報表算出來是 0，嘗試抓 info 裡的預設值當備案
+            # --- A 指標：近四季 TTM 成長率 ---
+            # 我們需要 8 個季度：今年 4 季 (0,1,2,3) vs 去年 4 季 (4,5,6,7)
+            if len(ni) >= 8:
+                current_ttm_sum = ni.iloc[0:4].sum()   # 最近一年總獲利
+                previous_ttm_sum = ni.iloc[4:8].sum()  # 前一年總獲利
+                
+                if previous_ttm_sum != 0:
+                    ttm_eps_growth = ((current_ttm_sum / previous_ttm_sum) - 1) * 100
+            
+            # 2. 數據補位邏輯：如果真的不到 8 季，才用替代方案
+            elif len(ni) >= 5:
+                # 這是為了避免 A 顯示 0%，改用當季成長率來代表目前的成長力道
+                ttm_eps_growth = eps_growth 
+
+        # --- 3. 兜底方案：如果報表真的抓不到，改抓 info 的資料 ---
         if eps_growth == 0:
             eps_growth = info.get('earningsQuarterlyGrowth', 0) * 100
+        if ttm_eps_growth == 0:
+            # 如果連 A 也是 0，嘗試抓 Yahoo 預估的年度成長率
+            ttm_eps_growth = info.get('earningsGrowth', 0) * 100
 
-        # --- M 指標：大盤趨勢 (SPY) ---
-        market_trend = "數據獲取中"
+        # 大盤趨勢判斷 (M)
+        market_trend = "判斷中..."
         try:
             spy = yf.Ticker("SPY")
-            spy_hist = spy.history(period="20d")
-            if len(spy_hist) >= 2:
-                current_spy = spy_hist['Close'].iloc[-1]
-                ma20_spy = spy_hist['Close'].mean()
-                market_trend = "看漲 (高於月線)" if current_spy > ma20_spy else "回檔 (低於月線)"
+            spy_h = spy.history(period="20d")
+            if not spy_h.empty:
+                curr_spy = spy_h['Close'].iloc[-1]
+                ma20 = spy_h['Close'].mean()
+                market_trend = "看漲 (高於月線)" if curr_spy > ma20 else "回檔 (低於月線)"
         except:
-            market_trend = "無法取得大盤資訊"
+            pass
 
         return {
             "name": info.get('longName', ticker),
@@ -109,11 +119,10 @@ def get_canslim_info(ticker):
             "inst_pct": info.get('heldPercentInstitutions', 0) * 100,
             "market_trend": market_trend
         }
-
     except Exception as e:
         print(f"Error for {ticker}: {e}")
         return None
-        
+            
 # --- UI 介面開始 ---
 # --- 強制標題樣式：原分頁跳轉（類 F5 效果） ---
 st.markdown(
