@@ -81,80 +81,87 @@ tab_us, tab_tw = st.tabs(["US (美股)", "TW (台股)"])
 
 # --- 美股分頁 ---
 with tab_us:
-    st.subheader("美股 RS 篩選 (分頁：FinTasticRS)")
-    min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 70, key="us_input")
+    st.subheader("美股 RS 篩選與分析")
     
-    if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
-        with st.spinner('正在分析數據...'):
-            base_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E"
-            csv_url = f"{base_url}/gviz/tq?tqx=out:csv&sheet=FinTasticRS"
-            
-            try:
-                df_raw = pd.read_csv(csv_url)
-                symbol_col = next((col for col in df_raw.columns if 'Symbol' in str(col)), None)
-                rs_col = next((col for col in df_raw.columns if 'RS Rnk' in str(col)), None)
-                
-                if symbol_col and rs_col:
-                    df_final = df_raw[[symbol_col, rs_col]].copy()
-                    df_final.columns = ['Symbol', 'RS_Rank']
-                    df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
-                    df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
-                    
-                    df_final = df_final[df_final['RS_Rank'].notna() & df_final['Symbol'].str.match(r'^[A-Z]{1,5}$')]
-                    filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
-                    
-                    if not filtered_us.empty:
-                        # 儲存到 session_state 供下拉選單使用
-                        st.session_state['filtered_us_list'] = filtered_us['Symbol'].tolist()
-                        
-                        csv_string_us = ",".join(st.session_state['filtered_us_list'])
-                        tw_now = get_tw_time()
-                        dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
-                        
-                        st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
-                        st.code(csv_string_us)
-                        st.download_button(f"📥 下載 {dynamic_filename}", csv_string_us, dynamic_filename, use_container_width=True)
-                        st.dataframe(filtered_us, use_container_width=True)
-                    else:
-                        st.warning("查無符合條件之股票。")
-            except Exception as e:
-                st.error(f"連線失敗: {e}")
-
-    # --- 方案一：側邊欄 CANSLIM 分析 ---
-    if 'filtered_us_list' in st.session_state:
-        st.divider()
-        selected_stock = st.selectbox("🔍 選擇代號查看 CANSLIM 深度分析", st.session_state['filtered_us_list'])
+    # 在美股分頁內建立子分頁
+    tab_us_list, tab_us_analysis = st.tabs(["📋 篩選清單", "🔍 CANSLIM 深度分析"])
+    
+    with tab_us_list:
+        min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 70, key="us_input")
         
-        if selected_stock:
-            with st.sidebar:
-                st.header(f"📊 {selected_stock} 分析")
-                data = get_canslim_info(selected_stock)
+        if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
+            with st.spinner('正在分析數據...'):
+                base_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E"
+                csv_url = f"{base_url}/gviz/tq?tqx=out:csv&sheet=FinTasticRS"
                 
-                if data:
-                    st.subheader(data['name'])
-                    st.caption(f"{data['sector']} | {data['industry']}")
+                try:
+                    df_raw = pd.read_csv(csv_url)
+                    symbol_col = next((col for col in df_raw.columns if 'Symbol' in str(col)), None)
+                    rs_col = next((col for col in df_raw.columns if 'RS Rnk' in str(col)), None)
                     
-                    # C: Current Earnings
-                    c_color = "green" if data['eps_growth'] >= 25 else "red"
-                    st.metric("C: 當季 EPS 成長率", f"{data['eps_growth']:.1f}%", delta=f"{data['eps_growth']-25:.1f}% vs 標竿", delta_color="normal")
-                    
-                    # N: New Highs
-                    dist_from_high = ((data['hi_52w'] - data['price']) / data['hi_52w']) * 100
-                    st.metric("N: 距 52 週高點", f"{data['price']:.2f}", f"-{dist_from_high:.1f}%", delta_color="inverse")
-                    
-                    # S: Supply (Float)
-                    float_m = data['float'] / 1_000_000
-                    st.write(f"**S: 流通股數 (Float):** {float_m:.1f}M")
-                    
-                    # I: Institutional
-                    st.write(f"**I: 法人持股比例:** {data['inst_pct']:.1f}%")
-                    
-                    st.progress(min(max(data['inst_pct']/100, 0.0), 1.0), text="法人支持度")
-                    
-                    st.info("💡 提醒：若 EPS 成長 > 25% 且股價接近新高，較符合 CANSLIM 突破特徵。")
-                else:
-                    st.error("暫時無法抓取該股財務數據。")
+                    if symbol_col and rs_col:
+                        df_final = df_raw[[symbol_col, rs_col]].copy()
+                        df_final.columns = ['Symbol', 'RS_Rank']
+                        df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
+                        df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
+                        
+                        df_final = df_final[df_final['RS_Rank'].notna() & df_final['Symbol'].str.match(r'^[A-Z]{1,5}$')]
+                        filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
+                        
+                        if not filtered_us.empty:
+                            # 儲存到 session_state
+                            st.session_state['filtered_us_list'] = filtered_us['Symbol'].tolist()
+                            
+                            csv_string_us = ",".join(st.session_state['filtered_us_list'])
+                            tw_now = get_tw_time()
+                            dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
+                            
+                            st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
+                            st.code(csv_string_us)
+                            st.download_button(f"📥 下載 {dynamic_filename}", csv_string_us, dynamic_filename, use_container_width=True)
+                            st.dataframe(filtered_us, use_container_width=True)
+                        else:
+                            st.warning("查無符合條件之股票。")
+                except Exception as e:
+                    st.error(f"連線失敗: {e}")
 
+    with tab_us_analysis:
+        if 'filtered_us_list' in st.session_state and st.session_state['filtered_us_list']:
+            selected_stock = st.selectbox("🎯 選擇代號進行深度診斷", st.session_state['filtered_us_list'])
+            
+            if selected_stock:
+                with st.spinner(f'正在讀取 {selected_stock} 的財務數據...'):
+                    data = get_canslim_info(selected_stock)
+                    
+                    if data:
+                        st.markdown(f"### 📊 {selected_stock} - {data['name']}")
+                        st.markdown(f"**產業：** {data['sector']} | {data['industry']}")
+                        st.divider()
+                        
+                        # 使用 columns 佈局讓資訊更美觀
+                        m1, m2 = st.columns(2)
+                        with m1:
+                            # C 指標
+                            st.metric("C: 當季 EPS 成長率", f"{data['eps_growth']:.1f}%", delta=f"{data['eps_growth']-25:.1f}%", delta_color="normal")
+                            # S 指標
+                            st.write(f"**S: 流通股數 (Float):** {data['float']/1e6:.1f}M")
+                            
+                        with m2:
+                            # N 指標
+                            dist_from_high = ((data['hi_52w'] - data['price']) / data['hi_52w']) * 100 if data['hi_52w'] > 0 else 0
+                            st.metric("N: 距 52 週高點", f"${data['price']:.2f}", f"-{dist_from_high:.1f}%", delta_color="inverse")
+                            # I 指標
+                            st.write(f"**I: 法人持股比例:** {data['inst_pct']:.1f}%")
+                        
+                        st.progress(min(max(data['inst_pct']/100, 0.0), 1.0), text="法人支持度 (I)")
+                        
+                        # 補充說明
+                        st.info(f"💡 分析結論：{selected_stock} 目前價格為 ${data['price']:.2f}。根據 CANSLIM，{'EPS 成長優於標竿' if data['eps_growth'] > 25 else 'EPS 成長尚待加強'}，且距離 52 週高點 {'極近，具突破潛力' if dist_from_high < 5 else '仍有一段距離'}。")
+                    else:
+                        st.warning("⚠️ 無法獲取該股財務數據，可能是 yfinance 暫時限制存取。")
+        else:
+            st.info("💡 請先在「篩選清單」分頁執行篩選，產生的名單將會顯示在這裡。")
+            
 # --- 台股分頁 (保持原本 Logic) ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
