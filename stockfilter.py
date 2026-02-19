@@ -76,36 +76,33 @@ def get_canslim_info(symbol):
         return None
 
 # --- UI 介面開始 ---
-# --- 強制標題樣式：永遠白色、無底線 ---
+# --- 強制標題樣式：原分頁跳轉（類 F5 效果） ---
 st.markdown(
     """
     <style>
-    /* 1. 隱藏 Streamlit 預設的標題連結小圖示 */
+    /* 1. 隱藏 Streamlit 標題連結小圖示 */
     .stApp a.heading-link {
         display: none !important;
     }
     
-    /* 2. 定義標題連結的狀態：初始、已訪問、滑鼠懸停、點擊中 */
+    /* 2. 強制樣式：永遠白色、無底線 */
     .custom-title-link, .custom-title-link:link, .custom-title-link:visited, 
     .custom-title-link:hover, .custom-title-link:active {
-        text-decoration: none !important;  /* 強制無底線 */
-        color: white !important;           /* 強制永遠白色 */
+        text-decoration: none !important;
+        color: white !important;
         cursor: pointer;
         text-align: center;
         display: block;
         margin: 25px 0px;
-        border: none !important;           /* 避免某些主題出現邊框 */
-        outline: none !important;
     }
 
-    /* 確保裡面的 h1 也不受主題干擾 */
     .custom-title-link h1 {
         color: white !important;
         margin: 0;
     }
     </style>
     
-    <a href="你的網址" target="_blank" class="custom-title-link">
+    <a href="https://your-app-name.streamlit.app/" target="_self" class="custom-title-link">
         <h1>RS Rank Filter</h1>
     </a>
     """, 
