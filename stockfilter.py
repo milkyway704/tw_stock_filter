@@ -54,48 +54,82 @@ def fetch_moneydj_rs(weeks, min_rank):
 
 # --- 2. CANSLIM 分析函數 (新功能) ---
 def get_canslim_info(ticker):
-    stock = yf.Ticker(ticker)
-    info = stock.info
-    
-    # --- 修正後的 A 指標邏輯 ---
-    annual_eps_growth = 0
+    """
+    獲取美股 CANSLIM 核心財務與市場數據
+    C: 當季 EPS 成長
+    A: 近四季 EPS 成長 (TTM)
+    N: 價格與 52 週高點
+    S: 流通股數
+    I: 法人持股
+    M: 市場大盤趨勢
+    """
     try:
-        # 優先從 info 抓取年度盈餘成長率
-        annual_eps_growth = info.get('earningsQuarterlyGrowth', 0) * 100 
+        stock = yf.Ticker(ticker)
+        # 為了效能，我們先抓取一次 info，後面再抓取報表
+        info = stock.info
         
-        # 如果還是 0，嘗試從 financials 抓取年度淨利並手動計算
-        if annual_eps_growth == 0:
-            financials = stock.financials
-            if not financials.empty and "Net Income" in financials.index:
-                # 抓取最近兩年的淨利 (Net Income)
-                net_income = financials.loc["Net Income"]
-                if len(net_income) >= 2:
-                    # 計算成長率：(今年 / 去年) - 1
-                    annual_eps_growth = ((net_income.iloc[0] / net_income.iloc[1]) - 1) * 100
-    except:
-        annual_eps_growth = 0
-    # -----------------------
-    # L 指標：直接取 session_state 裡的 RS_Rank (稍後在主程式對應)
-    # M 指標：我們可以抓標普 500 (SPY) 的近期表現作為參考
-    try:
-        spy = yf.Ticker("SPY")
-        hist = spy.history(period="5d")
-        market_trend = "看漲" if hist['Close'].iloc[-1] > hist['Close'].iloc[-2] else "盤整/回檔"
-    except:
-        market_trend = "數據獲取失敗"
+        # --- [C & A] 獲利指標：從季報表抓取數據計算 ---
+        eps_growth = 0
+        ttm_eps_growth = 0
+        
+        q_financials = stock.quarterly_financials
+        if not q_financials.empty and "Net Income" in q_financials.index:
+            net_income = q_financials.loc["Net Income"]
+            
+            # C: 當季成長 (最新 1 季 vs 去年同期第 5 季)
+            if len(net_income) >= 5:
+                current_q = net_income.iloc[0]
+                last_year_q = net_income.iloc[4]
+                if last_year_q > 0:
+                    eps_growth = ((current_q / last_year_q) - 1) * 100
+            
+            # A: 近四季成長 (最新 4 季總和 vs 去年同期 4 季總和)
+            if len(net_income) >= 8:
+                current_4q_sum = net_income.iloc[0:4].sum()
+                last_year_4q_sum = net_income.iloc[4:8].sum()
+                if last_year_4q_sum > 0:
+                    ttm_eps_growth = ((current_4q_sum / last_year_4q_sum) - 1) * 100
+        
+        # 如果報表抓不到，退而求其次使用 info 裡的預設欄位
+        if eps_growth == 0:
+            eps_growth = info.get('earningsQuarterlyGrowth', 0) * 100
 
-    # 回傳數據封裝 (補上 A, L, M)
-    return {
-        "name": info.get('longName', 'N/A'),
-        "price": info.get('currentPrice', 0),
-        "eps_growth": info.get('earningsGrowth', 0) * 100,
-        "annual_eps_growth": annual_eps_growth, # A
-        "hi_52w": info.get('fiftyTwoWeekHigh', 0),
-        "float": info.get('floatShares', 0),
-        "inst_pct": info.get('heldPercentInstitutions', 0) * 100,
-        "market_trend": market_trend # M
-    }
+        # --- [M] 市場大盤趨勢 (以標普 500 ETF 為準) ---
+        market_trend = "判斷中"
+        try:
+            spy = yf.Ticker("SPY")
+            # 抓取近 20 日價格判斷短期趨勢是否在季線或月線之上
+            spy_hist = spy.history(period="20d")
+            if len(spy_hist) >= 2:
+                # 簡單邏輯：最新價高於前一日且高於 20 日均線
+                current_spy = spy_hist['Close'].iloc[-1]
+                prev_spy = spy_hist['Close'].iloc[-2]
+                ma20_spy = spy_hist['Close'].mean()
+                if current_spy > ma20_spy:
+                    market_trend = "看漲 (高於月線)"
+                else:
+                    market_trend = "回檔 (低於月線)"
+        except:
+            market_trend = "數據獲取失敗"
 
+        # --- 封裝回傳數據 ---
+        return {
+            "name": info.get('longName', ticker),
+            "price": info.get('currentPrice', 0),
+            "eps_growth": eps_growth,               # C 指標
+            "ttm_eps_growth": ttm_eps_growth,       # A 指標 (近四季)
+            "hi_52w": info.get('fiftyTwoWeekHigh', 0), # N 指標
+            "float": info.get('floatShares', 0),    # S 指標
+            "inst_pct": info.get('heldPercentInstitutions', 0) * 100, # I 指標
+            "sector": info.get('sector', 'N/A'),
+            "industry": info.get('industry', 'N/A'),
+            "market_trend": market_trend            # M 指標
+        }
+
+    except Exception as e:
+        print(f"Error fetching data for {ticker}: {e}")
+        return None
+    
 # --- UI 介面開始 ---
 # --- 強制標題樣式：原分頁跳轉（類 F5 效果） ---
 st.markdown(
@@ -198,8 +232,10 @@ with tab_us:
                         
                         with m1:
                             st.write("#### 🔹 當期與年度 (C&A)")
+                            # C 指標
                             st.metric("C: 當季 EPS 成長", f"{data['eps_growth']:.1f}%", delta="標竿 25%")
-                            st.metric("A: 年度 EPS 成長", f"{data['annual_eps_growth']:.1f}%", delta="標竿 20%")
+                            # A 指標 (改為 TTM)
+                            st.metric("A: 近四季 EPS 成長", f"{data['ttm_eps_growth']:.1f}%", delta="標竿 20%")
                             
                         with m2:
                             st.write("#### 🔹 動能與領漲 (N&L)")
