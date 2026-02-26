@@ -6,6 +6,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import urllib3
 import yfinance as yf  # 新增：用於抓取 CANSLIM 財務數據
+import requests
+session = requests.Session()
+session.headers.update({'User-Agent': 'Mozilla/5.0'})
+stock = yf.Ticker(ticker, session=session)
 
 # 禁用 SSL 安全警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
