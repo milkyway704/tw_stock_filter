@@ -109,9 +109,9 @@ def get_canslim_info(ticker):
             "inst_pct": info.get('heldPercentInstitutions', 0) * 100,
             "market_trend": market_trend
         }
-
     except Exception as e:
-        print(f"Error for {ticker}: {e}")
+        # 改成這樣，網頁會彈出紅色框框告訴你具體錯誤（例如：KeyError 'Net Income'）
+        st.error(f"yfinance 錯誤 ({ticker}): {e}") 
         return None
             
 # --- UI 介面開始 ---
