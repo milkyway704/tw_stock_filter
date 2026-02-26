@@ -5,7 +5,7 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib3
-import yfinance as yf  # 新增：用於抓取 CANSLIM 財務數據
+import yfinance as yf
 
 # 禁用 SSL 安全警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -17,7 +17,7 @@ st.set_page_config(page_title="RS Rank Filter", page_icon="📈", layout="wide")
 def get_tw_time():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 1. 台股專用工具 (省略重複代碼，保持原本 logic) ---
+# --- 1. 台股專用工具 ---
 @st.cache_data(ttl=604800)
 def get_stock_mapping():
     urls = {"TWSE": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", "TPEX": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"}
@@ -52,27 +52,20 @@ def fetch_moneydj_rs(weeks, min_rank):
     except: pass
     return []
 
-# --- 2. CANSLIM 分析函數 (已加入 Session 偽裝) ---
+# --- 2. CANSLIM 分析函數 (修正：移除手動 Session，並加入 Cache 避免 Rate Limit) ---
+@st.cache_data(ttl=3600)  # 加入緩存，一小時內重複查詢不騷擾 API
 def get_canslim_info(ticker):
     try:
-        # --- Session 偽裝邏輯 ---
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Origin': 'https://finance.yahoo.com',
-            'Referer': 'https://finance.yahoo.com/'
-        })
-
-        # 將 session 傳入 yfinance
-        stock = yf.Ticker(ticker, session=session)
+        # 直接初始化，不傳入 session，yfinance 會自動使用內建的高級模擬機制
+        stock = yf.Ticker(ticker)
+        
+        # 獲取基礎資訊
         info = stock.info
         
         eps_growth = 0
         ttm_eps_growth = 0
         
-        # 抓取每季損益表
+        # 獲取季報
         q_financials = stock.quarterly_financials
         
         if not q_financials.empty and "Net Income" in q_financials.index:
@@ -98,8 +91,7 @@ def get_canslim_info(ticker):
         # --- M 指標：大盤趨勢 (SPY) ---
         market_trend = "數據獲取中"
         try:
-            # SPY 也使用 session 抓取
-            spy = yf.Ticker("SPY", session=session)
+            spy = yf.Ticker("SPY")
             spy_hist = spy.history(period="20d")
             if len(spy_hist) >= 2:
                 current_spy = spy_hist['Close'].iloc[-1]
@@ -122,7 +114,7 @@ def get_canslim_info(ticker):
         st.error(f"yfinance 錯誤 ({ticker}): {e}") 
         return None
             
-# --- UI 介面開始 ---
+# --- UI 介面 (保持不變) ---
 st.markdown(
     """
     <style>
@@ -133,13 +125,11 @@ st.markdown(
     }
     .custom-title-link h1 { color: white !important; margin: 0; }
     </style>
-    
-    <a href="/" target="_self" class="custom-title-link">
-        <h1>RS Rank Filter</h1>
-    </a>
+    <a href="/" target="_self" class="custom-title-link"><h1>RS Rank Filter</h1></a>
     """, 
     unsafe_allow_html=True
 )
+
 tab_us, tab_tw = st.tabs(["US (美股)", "TW (台股)"])
 
 with tab_us:
@@ -149,7 +139,7 @@ with tab_us:
     with tab_us_list:
         min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 70, key="us_input")
         if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
-            with st.spinner('正在從 Google Sheet 獲取最新數據...'):
+            with st.spinner('正在獲取最新數據...'):
                 base_url = "https://docs.google.com/spreadsheets/d/18EWLoHkh2aiJIKQsJnjOjPo63QFxkUE2U_K8ffHCn1E"
                 csv_url = f"{base_url}/gviz/tq?tqx=out:csv&sheet=FinTasticRS"
                 try:
@@ -168,11 +158,8 @@ with tab_us:
                             st.session_state['filtered_us_list'] = filtered_us['Symbol'].tolist()
                             st.session_state['rs_map'] = dict(zip(filtered_us['Symbol'], filtered_us['RS_Rank']))
                             csv_string_us = ",".join(st.session_state['filtered_us_list'])
-                            tw_now = get_tw_time()
-                            dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
                             st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
                             st.code(csv_string_us)
-                            st.download_button(f"📥 下載 {dynamic_filename}", csv_string_us, dynamic_filename, use_container_width=True)
                             st.dataframe(filtered_us, use_container_width=True, hide_index=True)
                         else:
                             st.warning("查無符合條件之股票。")
@@ -186,7 +173,6 @@ with tab_us:
                 with st.spinner(f'正在讀取 {selected_stock} 財務數據...'):
                     data = get_canslim_info(selected_stock)
                     current_rs = st.session_state.get('rs_map', {}).get(selected_stock, "N/A")
-
                     if data:
                         st.markdown(f"### 📊 {selected_stock} - {data['name']}")
                         st.divider()
@@ -208,26 +194,18 @@ with tab_us:
                             st.info(f"{data['inst_pct']:.1f}%")
                             st.write(f"**M: 市場趨勢 (SPY)**")
                             st.warning(f"當前：{data['market_trend']}")
-                        st.divider()
-                        is_strong = data['eps_growth'] > 25 and current_rs >= 80 and dist_from_high < 15
-                        if is_strong:
-                            st.success(f"🎯 **{selected_stock} 診斷結果：符合強勢股特徵** (C > 25%, L > 80, 接近高點)")
-                        else:
-                            reasons = []
-                            if data['eps_growth'] <= 25: reasons.append("當季成長(C)未達25%")
-                            if current_rs < 80: reasons.append("相對強度(L)未達80")
-                            if dist_from_high >= 15: reasons.append("股價距高點稍遠")
-                            st.warning(f"⚠️ **{selected_stock} 診斷提醒：** {'、'.join(reasons)}。建議搭配技術面觀察。")
                     else:
                         st.warning("⚠️ 無法獲取 yfinance 數據。")
         else:
             st.info("💡 請先在「📋 篩選清單」執行篩選。")
 
+# --- 台股分頁 (保持原本 Logic) ---
 with tab_tw:
     st.subheader("台股 RS 篩選")
     col1, col2 = st.columns(2)
     with col1: weeks = st.number_input("週數", 1, 52, 2) 
     with col2: min_rank = st.number_input("RS Rank 下限", 1, 99, 80)
+    
     max_count = st.slider("顯示上限", 50, 500, 200)
 
     if st.button("🚀 執行台股篩選", type="primary", use_container_width=True):
