@@ -17,10 +17,10 @@ st.set_page_config(page_title="RS Rank Filter", page_icon="📈", layout="wide")
 def get_tw_time():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 1. 台股專用工具 (修正 BUG 版) ---
+# --- 1. 台股專用工具 ---
 @st.cache_data(ttl=604800)
 def get_stock_mapping():
-    """從證交所與櫃買中心抓取最新股票對應表，確保市場分組正確"""
+    """抓取股票對應表"""
     urls = {
         "TWSE": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", 
         "TPEX": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
@@ -34,27 +34,16 @@ def get_stock_mapping():
             resp.encoding = 'ms950'
             soup = BeautifulSoup(resp.text, 'html.parser')
             rows = soup.find_all('tr')
-            
             for row in rows:
                 cols = row.find_all('td')
                 if not cols or len(cols) < 1: continue
-                
-                # 核心修正：先取得文字，將全形空白替換為半形，再用 split() 自動處理多個空格
                 text = cols[0].get_text(strip=True).replace('\u3000', ' ')
                 parts = text.split() 
-                
-                # 判定：第一個部分必須是 4 碼數字代號
                 if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 4:
                     code = parts[0]
-                    # 只有第一次抓到時才寫入，避免重複覆蓋
                     if code not in mapping:
-                        mapping[code] = {
-                            "name": parts[1], 
-                            "prefix": market
-                        }
-        except Exception as e:
-            st.error(f"無法讀取 {market} 市場清單: {e}")
-            continue
+                        mapping[code] = {"name": parts[1], "prefix": market}
+        except: continue
     return mapping
 
 def fetch_moneydj_rs(weeks, min_rank):
@@ -75,12 +64,9 @@ def get_canslim_info(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        
         eps_growth = 0
         ttm_eps_growth = 0
-        
         q_financials = stock.quarterly_financials
-        
         if not q_financials.empty and "Net Income" in q_financials.index:
             net_income = q_financials.loc["Net Income"]
             if len(net_income) >= 5:
@@ -88,16 +74,13 @@ def get_canslim_info(ticker):
                 last_year_q = net_income.iloc[4]
                 if pd.notna(current_q) and pd.notna(last_year_q) and last_year_q != 0:
                     eps_growth = ((current_q / last_year_q) - 1) * 100
-            
             if len(net_income) >= 8:
                 current_4q_sum = net_income.iloc[0:4].sum()
                 last_year_4q_sum = net_income.iloc[4:8].sum()
                 if pd.notna(current_4q_sum) and pd.notna(last_year_4q_sum) and last_year_4q_sum != 0:
                     ttm_eps_growth = ((current_4q_sum / last_year_4q_sum) - 1) * 100
-
         if eps_growth == 0:
             eps_growth = info.get('earningsQuarterlyGrowth', 0) * 100
-
         market_trend = "數據獲取中"
         try:
             spy = yf.Ticker("SPY")
@@ -105,39 +88,24 @@ def get_canslim_info(ticker):
             if len(spy_hist) >= 2:
                 current_spy = spy_hist['Close'].iloc[-1]
                 ma20_spy = spy_hist['Close'].mean()
-                market_trend = "看漲 (高於月線)" if current_spy > ma20_spy else "回檔 (低於月線)"
-        except:
-            market_trend = "無法取得大盤資訊"
-
+                market_trend = "看漲" if current_spy > ma20_spy else "回檔"
+        except: market_trend = "無法取得大盤資訊"
         return {
-            "name": info.get('longName', ticker),
-            "price": info.get('currentPrice', 0),
-            "eps_growth": eps_growth,
-            "ttm_eps_growth": ttm_eps_growth,
-            "hi_52w": info.get('fiftyTwoWeekHigh', 0),
-            "float": info.get('floatShares', 0),
-            "inst_pct": info.get('heldPercentInstitutions', 0) * 100,
-            "market_trend": market_trend
+            "name": info.get('longName', ticker), "price": info.get('currentPrice', 0),
+            "eps_growth": eps_growth, "ttm_eps_growth": ttm_eps_growth,
+            "hi_52w": info.get('fiftyTwoWeekHigh', 0), "float": info.get('floatShares', 0),
+            "inst_pct": info.get('heldPercentInstitutions', 0) * 100, "market_trend": market_trend
         }
-    except Exception as e:
-        st.error(f"yfinance 錯誤 ({ticker}): {e}") 
-        return None
+    except: return None
             
 # --- UI 介面 ---
 st.markdown(
-    """
-    <style>
+    """<style>
     .stApp a.heading-link { display: none !important; }
-    .custom-title-link, .custom-title-link:link, .custom-title-link:visited, 
-    .custom-title-link:hover, .custom-title-link:active {
-        text-decoration: none !important; color: white !important; cursor: pointer; text-align: center; display: block; margin: 25px 0px;
-    }
+    .custom-title-link { text-decoration: none !important; color: white !important; text-align: center; display: block; margin: 25px 0px; }
     .custom-title-link h1 { color: white !important; margin: 0; }
     </style>
-    <a href="/" target="_self" class="custom-title-link">
-        <h1>RS Rank Filter</h1>
-    </a>
-    """, 
+    <a href="/" target="_self" class="custom-title-link"><h1>RS Rank Filter</h1></a>""", 
     unsafe_allow_html=True
 )
 
@@ -147,7 +115,6 @@ tab_us, tab_tw = st.tabs(["US (美股)", "TW (台股)"])
 with tab_us:
     st.subheader("美股 RS 篩選與 CANSLIM 分析")
     tab_us_list, tab_us_analysis = st.tabs(["📋 篩選清單", "🔍 CANSLIM"])
-    
     with tab_us_list:
         min_rs_us = st.number_input("RS Rank 最低標", 1, 100, 70, key="us_input")
         if st.button("🚀 執行美股篩選", type="primary", use_container_width=True):
@@ -162,64 +129,23 @@ with tab_us:
                         df_final = df_raw[[symbol_col, rs_col]].copy()
                         df_final.columns = ['Symbol', 'RS_Rank']
                         df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
-                        df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
-                        df_final = df_final[df_final['RS_Rank'].notna() & df_final['Symbol'].str.match(r'^[A-Z]{1,5}$')]
+                        df_final = df_final[df_final['RS_Rank'].notna()]
                         filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
-                        
                         if not filtered_us.empty:
                             st.session_state['filtered_us_list'] = filtered_us['Symbol'].tolist()
-                            st.session_state['rs_map'] = dict(zip(filtered_us['Symbol'], filtered_us['RS_Rank']))
                             csv_string_us = ",".join(st.session_state['filtered_us_list'])
-                            tw_now = get_tw_time()
-                            dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
-                            st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
                             st.code(csv_string_us)
-                            st.download_button(f"📥 下載 {dynamic_filename}", csv_string_us, dynamic_filename, use_container_width=True)
+                            st.download_button(f"📥 下載 TXT", csv_string_us, f"US_{get_tw_time().strftime('%Y_%m_%d')}.txt", use_container_width=True)
                             st.dataframe(filtered_us, use_container_width=True, hide_index=True)
-                        else:
-                            st.warning("查發符合條件之股票。")
-                except Exception as e:
-                    st.error(f"連線失敗: {e}")
+                except: st.error("連線失敗")
 
     with tab_us_analysis:
-        if 'filtered_us_list' in st.session_state and st.session_state['filtered_us_list']:
+        if 'filtered_us_list' in st.session_state:
             selected_stock = st.selectbox("🎯 選擇代號查看 CANSLIM 數據", st.session_state['filtered_us_list'])
             if selected_stock:
-                with st.spinner(f'正在讀取 {selected_stock} 財務數據...'):
-                    data = get_canslim_info(selected_stock)
-                    current_rs = st.session_state.get('rs_map', {}).get(selected_stock, "N/A")
-
-                    if data:
-                        st.markdown(f"### 📊 {selected_stock} - {data['name']}")
-                        st.divider()
-                        m1, m2, m3 = st.columns(3)
-                        with m1:
-                            st.write("#### 🔹 當期與年度 (C&A)")
-                            st.metric("C: 當季 EPS 成長", f"{data['eps_growth']:.1f}%", delta="標竿 25%")
-                            st.metric("A: 近四季 EPS 成長", f"{data['ttm_eps_growth']:.1f}%", delta="標竿 20%")
-                        with m2:
-                            st.write("#### 🔹 動能與領漲 (N&L)")
-                            dist_from_high = ((data['hi_52w'] - data['price']) / data['hi_52w']) * 100 if data['hi_52w'] > 0 else 0
-                            st.metric("N: 距 52 週高點", f"${data['price']:.2f}", f"-{dist_from_high:.1f}%", delta_color="inverse")
-                            st.metric("L: 相對強度 Rank", f"{current_rs}", delta="標竿 80")
-                        with m3:
-                            st.write("#### 🔹 籌碼與大盤 (S&I&M)")
-                            st.write(f"**S: 流通股 (Float)**")
-                            st.info(f"{data['float']/1e6:.1f}M Shares")
-                            st.write(f"**I: 法人持股**")
-                            st.info(f"{data['inst_pct']:.1f}%")
-                            st.write(f"**M: 市場趨勢 (SPY)**")
-                            st.warning(f"當前：{data['market_trend']}")
-                        st.divider()
-                        is_strong = data['eps_growth'] > 25 and (isinstance(current_rs, (int, float)) and current_rs >= 80) and dist_from_high < 15
-                        if is_strong:
-                            st.success(f"🎯 **{selected_stock} 診斷結果：符合強勢股特徵**")
-                        else:
-                            st.warning(f"⚠️ **{selected_stock} 診斷提醒：** 成長性、強度或位置未完全達標，建議觀察。")
-                    else:
-                        st.warning("⚠️ 無法獲取 yfinance 數據。")
-        else:
-            st.info("💡 請先在「📋 篩選清單」執行篩選。")
+                data = get_canslim_info(selected_stock)
+                if data: st.write(f"### {selected_stock} - {data['name']}")
+        else: st.info("💡 請先執行篩選。")
 
 # --- 台股分頁 ---
 with tab_tw:
@@ -230,7 +156,7 @@ with tab_tw:
     max_count = st.slider("顯示上限", 50, 500, 200)
 
     if st.button("🚀 執行台股篩選", type="primary", use_container_width=True):
-        with st.spinner('正在同步市場分類清單...'):
+        with st.spinner('正在獲取數據...'):
             mapping = get_stock_mapping()
             codes = fetch_moneydj_rs(weeks, min_rank)
             
@@ -240,19 +166,21 @@ with tab_tw:
                 display_tw = []
                 
                 for c in final_codes:
-                    # 核心修正：將代號轉為字串進行精準比對
                     stock_code = str(c)
                     info = mapping.get(stock_code)
                     
                     if info:
+                        # 如果 Mapping 抓到了，就給正確的
                         mkt = info['prefix']
                         name = info['name']
+                        tv_list_tw.append(f"{mkt}:{stock_code}")
                     else:
-                        # 補救：若對應表沒抓到，預設設為 TWSE 但在名稱標記
-                        mkt = "TWSE"
-                        name = f"未知-{stock_code}"
+                        # 【核心修正點】：如果抓不到，幫你接上上市+上櫃組合
+                        # TradingView 遇到 TWSE:3581,TPEX:3581 會自動對應正確的那個
+                        name = f"自動識別-{stock_code}"
+                        mkt = "TWSE/TPEX"
+                        tv_list_tw.append(f"TWSE:{stock_code},TPEX:{stock_code}")
                     
-                    tv_list_tw.append(f"{mkt}:{stock_code}")
                     display_tw.append({"代號": stock_code, "名稱": name, "市場": mkt})
                 
                 st.success(f"找到 {len(codes)} 檔標的")
@@ -270,5 +198,3 @@ with tab_tw:
                 
                 st.markdown("### 🔍 篩選結果明細")
                 st.dataframe(display_tw, use_container_width=True, hide_index=True)
-            else:
-                st.error("無法從 MoneyDJ 獲取數據，請稍後再試。")
