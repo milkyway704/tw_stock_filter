@@ -17,27 +17,41 @@ st.set_page_config(page_title="RS Rank Filter", page_icon="📈", layout="wide")
 def get_tw_time():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 1. 台股專用工具 ---
+# --- 1. 台股專用工具 (優化版) ---
 @st.cache_data(ttl=604800)
 def get_stock_mapping():
-    urls = {"TWSE": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", "TPEX": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"}
+    """從證交所與櫃買中心抓取最新股票對應表，確保市場分組正確"""
+    urls = {
+        "TWSE": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", 
+        "TPEX": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+    }
     mapping = {}
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
     for market, url in urls.items():
         try:
-            resp = requests.get(url, headers=headers, timeout=10, verify=False)
+            resp = requests.get(url, headers=headers, timeout=15, verify=False)
             resp.encoding = 'ms950'
             soup = BeautifulSoup(resp.text, 'html.parser')
             rows = soup.find_all('tr')
-            prefix = "TWSE" if market == "TWSE" else "TPEX"
+            
             for row in rows:
                 cols = row.find_all('td')
                 if not cols or len(cols) < 1: continue
+                
+                # 格式通常為 "2330  台積電"
                 text = cols[0].get_text(strip=True).replace('\u3000', ' ')
                 parts = text.split(' ')
-                if len(parts) >= 2 and parts[0].isdigit():
-                    mapping[str(parts[0])] = {"name": parts[1], "prefix": prefix}
-        except: continue
+                
+                # 過濾：必須是數字代號，且長度為 4 (過濾權證與特別股)
+                if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 4:
+                    mapping[str(parts[0])] = {
+                        "name": parts[1], 
+                        "prefix": market  # 存入 "TWSE" 或 "TPEX"
+                    }
+        except Exception as e:
+            st.error(f"無法讀取 {market} 市場清單: {e}")
+            continue
     return mapping
 
 def fetch_moneydj_rs(weeks, min_rank):
@@ -52,42 +66,35 @@ def fetch_moneydj_rs(weeks, min_rank):
     except: pass
     return []
 
-# --- 2. CANSLIM 分析函數 (加入 3600秒快取) ---
+# --- 2. CANSLIM 分析函數 ---
 @st.cache_data(ttl=3600)
 def get_canslim_info(ticker):
     try:
-        # 不再傳入自定義 Session，讓 yfinance 自動處理最新反爬蟲機制
         stock = yf.Ticker(ticker)
         info = stock.info
         
         eps_growth = 0
         ttm_eps_growth = 0
         
-        # 抓取每季損益表
         q_financials = stock.quarterly_financials
         
         if not q_financials.empty and "Net Income" in q_financials.index:
             net_income = q_financials.loc["Net Income"]
-            
-            # --- C 指標：當季 YoY 成長 ---
             if len(net_income) >= 5:
                 current_q = net_income.iloc[0]
                 last_year_q = net_income.iloc[4]
                 if pd.notna(current_q) and pd.notna(last_year_q) and last_year_q != 0:
                     eps_growth = ((current_q / last_year_q) - 1) * 100
             
-            # --- A 指標：近四季 TTM 成長 ---
             if len(net_income) >= 8:
                 current_4q_sum = net_income.iloc[0:4].sum()
                 last_year_4q_sum = net_income.iloc[4:8].sum()
                 if pd.notna(current_4q_sum) and pd.notna(last_year_4q_sum) and last_year_4q_sum != 0:
                     ttm_eps_growth = ((current_4q_sum / last_year_4q_sum) - 1) * 100
 
-        # 備案：如果報表計算失敗，嘗試抓 info 內的成長率
         if eps_growth == 0:
             eps_growth = info.get('earningsQuarterlyGrowth', 0) * 100
 
-        # --- M 指標：大盤趨勢 (SPY) ---
         market_trend = "數據獲取中"
         try:
             spy = yf.Ticker("SPY")
@@ -113,7 +120,7 @@ def get_canslim_info(ticker):
         st.error(f"yfinance 錯誤 ({ticker}): {e}") 
         return None
             
-# --- UI 介面開始 ---
+# --- UI 介面 ---
 st.markdown(
     """
     <style>
@@ -220,20 +227,42 @@ with tab_tw:
     max_count = st.slider("顯示上限", 50, 500, 200)
 
     if st.button("🚀 執行台股篩選", type="primary", use_container_width=True):
-        with st.spinner('同步數據中...'):
+        with st.spinner('正在同步市場分類清單...'):
             mapping = get_stock_mapping()
             codes = fetch_moneydj_rs(weeks, min_rank)
+            
             if codes:
                 final_codes = codes[:max_count]
-                tv_list_tw = []; display_tw = []
+                tv_list_tw = []
+                display_tw = []
+                
                 for c in final_codes:
                     info = mapping.get(str(c))
-                    mkt = info['prefix'] if info else "TWSE"
-                    name = info['name'] if info else f"代號 {c}"
+                    if info:
+                        mkt = info['prefix']  # 正確獲取 TWSE 或 TPEX
+                        name = info['name']
+                    else:
+                        # 預設補救：通常 4 碼在 mapping 沒抓到可能是剛掛牌，預設給 TWSE
+                        mkt = "TWSE"
+                        name = f"未知-{c}"
+                    
                     tv_list_tw.append(f"{mkt}:{c}")
                     display_tw.append({"代號": c, "名稱": name, "市場": mkt})
-                st.success(f"找到 {len(codes)} 檔標的")
+                
+                st.success(f"找到 {len(codes)} 檔標的，已過濾前 {len(final_codes)} 檔")
                 csv_tw = ",".join(tv_list_tw)
+                
+                st.markdown("### 📋 TradingView 匯入清單")
                 st.code(csv_tw)
-                st.download_button("📥 下載 TW 清單", csv_tw, f"TW_{get_tw_time().strftime('%Y_%m_%d')}.txt", use_container_width=True)
-                st.dataframe(display_tw, use_container_width=True)
+                
+                st.download_button(
+                    "📥 下載 TW 清單 (TXT)", 
+                    csv_tw, 
+                    f"TW_RS_{get_tw_time().strftime('%Y_%m_%d')}.txt", 
+                    use_container_width=True
+                )
+                
+                st.markdown("### 🔍 篩選結果明細")
+                st.dataframe(display_tw, use_container_width=True, hide_index=True)
+            else:
+                st.error("無法從 MoneyDJ 獲取數據，請稍後再試。")
