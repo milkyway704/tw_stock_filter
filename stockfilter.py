@@ -188,7 +188,7 @@ with tab_tw:
                         name = info['name']
                     else:
                         # 2. 如果 mapping 真的沒抓到，預設設為 TWSE (恢復你原始的保險設定)
-                        mkt = "TWSE"
+                        mkt = "TPEX"
                         name = f"未知-{stock_code}"
                     
                     tv_list_tw.append(f"{mkt}:{stock_code}")
