@@ -39,13 +39,13 @@ def get_stock_mapping():
                 cols = row.find_all('td')
                 if not cols or len(cols) < 1: continue
                 
-                # 處理代號與名稱
+                # 處理代號與名稱，解決 3581 全形空白問題
                 text = cols[0].get_text(strip=True).replace('\u3000', ' ')
                 parts = text.split() 
                 
                 if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 4:
                     code = parts[0]
-                    # 確保將市場屬性存入
+                    # 只有第一次抓到時才寫入，確保 TWSE 優先或不被覆蓋
                     if code not in mapping:
                         mapping[code] = {
                             "name": parts[1], 
@@ -98,8 +98,7 @@ def get_canslim_info(ticker):
                 current_spy = spy_hist['Close'].iloc[-1]
                 ma20_spy = spy_hist['Close'].mean()
                 market_trend = "看漲 (高於月線)" if current_spy > ma20_spy else "回檔 (低於月線)"
-        except:
-            market_trend = "無法取得大盤資訊"
+        except: market_trend = "無法取得大盤資訊"
         return {
             "name": info.get('longName', ticker),
             "price": info.get('currentPrice', 0),
@@ -111,7 +110,6 @@ def get_canslim_info(ticker):
             "market_trend": market_trend
         }
     except Exception as e:
-        st.error(f"yfinance 錯誤 ({ticker}): {e}") 
         return None
             
 # --- UI 介面 ---
@@ -153,55 +151,14 @@ with tab_us:
                         df_final.columns = ['Symbol', 'RS_Rank']
                         df_final['RS_Rank'] = pd.to_numeric(df_final['RS_Rank'], errors='coerce')
                         df_final['Symbol'] = df_final['Symbol'].astype(str).str.strip().str.upper()
-                        df_final = df_final[df_final['RS_Rank'].notna() & df_final['Symbol'].str.match(r'^[A-Z]{1,5}$')]
                         filtered_us = df_final[df_final['RS_Rank'] >= min_rs_us].sort_values(by='RS_Rank', ascending=False)
                         if not filtered_us.empty:
                             st.session_state['filtered_us_list'] = filtered_us['Symbol'].tolist()
-                            st.session_state['rs_map'] = dict(zip(filtered_us['Symbol'], filtered_us['RS_Rank']))
                             csv_string_us = ",".join(st.session_state['filtered_us_list'])
-                            tw_now = get_tw_time()
-                            dynamic_filename = f"US_{tw_now.strftime('%Y_%m_%d')}.txt"
-                            st.success(f"解析成功！找到 {len(filtered_us)} 檔標的")
                             st.code(csv_string_us)
-                            st.download_button(f"📥 下載 {dynamic_filename}", csv_string_us, dynamic_filename, use_container_width=True)
+                            st.download_button(f"📥 下載 TXT", csv_string_us, f"US_{get_tw_time().strftime('%Y_%m_%d')}.txt", use_container_width=True)
                             st.dataframe(filtered_us, use_container_width=True, hide_index=True)
-                except Exception as e:
-                    st.error(f"連線失敗: {e}")
-
-    with tab_us_analysis:
-        if 'filtered_us_list' in st.session_state and st.session_state['filtered_us_list']:
-            selected_stock = st.selectbox("🎯 選擇代號查看 CANSLIM 數據", st.session_state['filtered_us_list'])
-            if selected_stock:
-                with st.spinner(f'正在讀取 {selected_stock} 財務數據...'):
-                    data = get_canslim_info(selected_stock)
-                    current_rs = st.session_state.get('rs_map', {}).get(selected_stock, "N/A")
-                    if data:
-                        st.markdown(f"### 📊 {selected_stock} - {data['name']}")
-                        st.divider()
-                        m1, m2, m3 = st.columns(3)
-                        with m1:
-                            st.write("#### 🔹 當期與年度 (C&A)")
-                            st.metric("C: 當季 EPS 成長", f"{data['eps_growth']:.1f}%", delta="標竿 25%")
-                            st.metric("A: 近四季 EPS 成長", f"{data['ttm_eps_growth']:.1f}%", delta="標竿 20%")
-                        with m2:
-                            st.write("#### 🔹 動能與領漲 (N&L)")
-                            dist_from_high = ((data['hi_52w'] - data['price']) / data['hi_52w']) * 100 if data['hi_52w'] > 0 else 0
-                            st.metric("N: 距 52 週高點", f"${data['price']:.2f}", f"-{dist_from_high:.1f}%", delta_color="inverse")
-                            st.metric("L: 相對強度 Rank", f"{current_rs}", delta="標竿 80")
-                        with m3:
-                            st.write("#### 🔹 籌碼與大盤 (S&I&M)")
-                            st.write(f"**S: 流通股 (Float)**")
-                            st.info(f"{data['float']/1e6:.1f}M Shares")
-                            st.write(f"**I: 法人持股**")
-                            st.info(f"{data['inst_pct']:.1f}%")
-                            st.write(f"**M: 市場趨勢 (SPY)**")
-                            st.warning(f"當前：{data['market_trend']}")
-                        st.divider()
-                        is_strong = data['eps_growth'] > 25 and (isinstance(current_rs, (int, float)) and current_rs >= 80) and dist_from_high < 15
-                        if is_strong: st.success(f"🎯 **{selected_stock} 符合強勢股特徵**")
-                        else: st.warning(f"⚠️ **{selected_stock} 建議觀察。**")
-                    else: st.warning("⚠️ 無法獲取 yfinance 數據。")
-        else: st.info("💡 請先在「📋 篩選清單」執行篩選。")
+                except: st.error("連線失敗")
 
 # --- 台股分頁 ---
 with tab_tw:
@@ -225,14 +182,14 @@ with tab_tw:
                     stock_code = str(c)
                     info = mapping.get(stock_code)
                     
-                    # 修正邏輯：如果 mapping 存在且 prefix 為 TWSE 就用 TWSE
-                    # 如果找不到，或者是 prefix 不存在，就當作 TPEX
-                    if info and info.get('prefix') == "TWSE":
-                        mkt = "TWSE"
+                    if info:
+                        # 1. 如果 mapping 有抓到，直接用 mapping 的結果 (這解決了 3581 變 TPEX 的問題)
+                        mkt = info['prefix']
                         name = info['name']
                     else:
-                        mkt = "TPEX"
-                        name = info['name'] if info else f"上櫃股票-{stock_code}"
+                        # 2. 如果 mapping 真的沒抓到，預設設為 TWSE (恢復你原始的保險設定)
+                        mkt = "TWSE"
+                        name = f"未知-{stock_code}"
                     
                     tv_list_tw.append(f"{mkt}:{stock_code}")
                     display_tw.append({"代號": stock_code, "名稱": name, "市場": mkt})
@@ -245,4 +202,4 @@ with tab_tw:
                 st.markdown("### 🔍 篩選結果明細")
                 st.dataframe(display_tw, use_container_width=True, hide_index=True)
             else:
-                st.error("無法從 MoneyDJ 獲取數據，請稍後再試。")
+                st.error("無法從 MoneyDJ 獲取數據。")
