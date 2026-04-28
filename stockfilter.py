@@ -17,10 +17,10 @@ st.set_page_config(page_title="RS Rank Filter", page_icon="📈", layout="wide")
 def get_tw_time():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 1. 台股專用工具 (優化版) ---
+# --- 1. 台股專用工具 (修正 BUG 版) ---
 @st.cache_data(ttl=604800)
 def get_stock_mapping():
-    """從證交所與櫃買中心抓取最新股票對應表，確保市場分組正確"""
+    """從證交所與櫃買中心抓取最新股票對應表，解決 3581 等上櫃股誤判問題"""
     urls = {
         "TWSE": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", 
         "TPEX": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
@@ -39,16 +39,22 @@ def get_stock_mapping():
                 cols = row.find_all('td')
                 if not cols or len(cols) < 1: continue
                 
-                # 格式通常為 "2330  台積電"
-                text = cols[0].get_text(strip=True).replace('\u3000', ' ')
-                parts = text.split(' ')
+                # 取得原始文字並處理全形空白
+                raw_text = cols[0].get_text(strip=True).replace('\u3000', ' ')
                 
-                # 過濾：必須是數字代號，且長度為 4 (過濾權證與特別股)
-                if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 4:
-                    mapping[str(parts[0])] = {
-                        "name": parts[1], 
-                        "prefix": market  # 存入 "TWSE" 或 "TPEX"
-                    }
+                # 使用正規表示法精準匹配：開頭 4 位數字 + 空格 + 名稱
+                # 解決 split(' ') 導致 3581 等代號抓取失敗的問題
+                match = re.match(r'^(\d{4})\s+(.+)$', raw_text)
+                
+                if match:
+                    code = match.group(1)
+                    name = match.group(2)
+                    # 只有當代號不在 mapping 中才存入，確保市場不被覆蓋
+                    if code not in mapping:
+                        mapping[code] = {
+                            "name": name, 
+                            "prefix": market
+                        }
         except Exception as e:
             st.error(f"無法讀取 {market} 市場清單: {e}")
             continue
@@ -239,12 +245,12 @@ with tab_tw:
                 for c in final_codes:
                     info = mapping.get(str(c))
                     if info:
-                        mkt = info['prefix']  # 正確獲取 TWSE 或 TPEX
+                        mkt = info['prefix']  # 取得精準的 TWSE 或 TPEX
                         name = info['name']
                     else:
-                        # 預設補救：通常 4 碼在 mapping 沒抓到可能是剛掛牌，預設給 TWSE
-                        mkt = "TWSE"
-                        name = f"未知-{c}"
+                        # 若不在清單內，標記為 UNKNOWN 以供辨識 BUG
+                        mkt = "UNKNOWN"
+                        name = f"未識別代號-{c}"
                     
                     tv_list_tw.append(f"{mkt}:{c}")
                     display_tw.append({"代號": c, "名稱": name, "市場": mkt})
